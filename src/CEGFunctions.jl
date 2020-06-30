@@ -412,7 +412,7 @@ function get_key_sequence(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=
     b_wei = n_we[ii] #getting the linear weight for every note i n the array of pitches
     if mod_12
         spi_ix = get_cfpitch_mod12(ptcs)
-        println("WARNING! \n Doing module 12 notes.")
+        #println("WARNING! \n Doing module 12 notes.")
     else
         spi_ix = get_cfpitch(ptcs)
     end
