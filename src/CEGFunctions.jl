@@ -411,10 +411,19 @@ function get_key_sequence(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=
     #println(ptcs)
     b_wei = n_we[ii] #getting the linear weight for every note i n the array of pitches
     if mod_12
-        spi_ix = get_cfpitch_mod12(ptcs)
+        mod12_seq = get_cfpitch_mod12(ptcs)
+        spi_ix = reorder_seq_closest(mod12_seq).+12
         #println("WARNING! \n Doing module 12 notes.")
     else
         spi_ix = get_cfpitch(ptcs)
+        if length(spi_ix) > 1
+            max_dif = 10
+            while max_dif > 6
+                nex_seq = reorder_seq_closest(spi_ix)
+                max_dif = maximum(map(x-> abs(x),diff(nex_seq)))
+                spi_ix = nex_seq
+            end
+        end
     end
     spi_p = map(x-> get_pitch(x, r=r, h=h), spi_ix) #getting the location (x,y,z) for each pitch
     t_ws = map((x,y,z)-> x*y*z, beat_w,durs, b_wei) #computing the total weights
@@ -463,6 +472,32 @@ end
 
 ################################################################################
 #####TOOLS
+"""
+    reorder_seq_closest(ex_seq)
+
+    Returns a re-ordered sequence of pitches in the spiral representation order,
+    the sequence satisfies the property that any step between two consecutive notes
+    is not farther than 6, meaning that the steps are to the closest note not to the
+    real one.
+"""
+function reorder_seq_closest(ex_seq)
+    nex_seq = []
+    push!(nex_seq,ex_seq[1])
+    for i = 1:(length(ex_seq)-1)
+        delta = ex_seq[i+1] - nex_seq[i]
+        if abs(delta) > 6
+            if delta < 0
+                push!(nex_seq, nex_seq[i]+(12+delta))
+            else
+                push!(nex_seq, nex_seq[i]-(12-delta))
+            end
+        else
+            push!(nex_seq, ex_seq[i+1])
+        end
+    end
+    return nex_seq
+end
+
 """
     get_local_lin_w(ptcs, factor)
 
