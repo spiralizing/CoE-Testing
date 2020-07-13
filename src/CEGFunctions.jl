@@ -439,10 +439,41 @@ function get_key_sequence(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=
 end
 
 """
-    get_kseq_properties(key_seqs)
+    get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15),
+        mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
 
-    Returns properties computed from a sequence of keys: An array of tables |Key | Distance |
-    as the second output of the function get_key_sequence.
+    Returns a list of all the closest keys with their respective normalized frequency and the average distance:
+        | Closest Key | Frequency | Average Distance |
+    The algorithm for finding the closest key is the get_key_sequence which computes the center of effect of a set of notes
+    since the center of effect is sensitive to the order in time of the notes, this function computes n_iter times the
+    get_key_sequence function for a random shuffle version of the original set of notes, after that it returns the
+    frequency distribution of the closest keys and the average distance to that key.
+"""
+
+function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
+    key_list = Array{Any}(undef, n_iter,2)
+    for t=1:n_iter
+        ixes = [j for j=1:size(notes_chunk,1)]
+        f_m = notes_chunk[shuffle(ixes),:]
+        m_key = get_key_sequence(f_m, mod_12=mod_12,r=r,h=h,all_keys=all_keys,pos_all_keys=pos_all_keys,sbeat_w=sbeat_w,lin_w=lin_w)[2][1,:]
+        key_list[t,1] = m_key[1]; key_list[t,2] = m_key[2]
+    end
+    rf = get_rank_freq(key_list[:,1])
+    n_keys = size(rf,1)
+    t_count = sum(rf[:,2])
+    k_vals = Array{Any}(undef, n_keys,3)
+    for i = 1:n_keys
+        mv = mean(key_list[findall(x-> x==rf[i,1], key_list[:,1]),2])
+        k_vals[i,1] = rf[i,1]; k_vals[i,2] = rf[i,2] / t_count; k_vals[i,3] = mv
+    end
+    return k_vals
+end
+
+"""
+    get_kseq_properties(key_seqs; p_distance=true)
+
+    Returns properties computed from a sequence of keys: An array of tables | Key | Distance | if p_distance is true
+    if p_distance is false the imput should have the probabilities instead of distances | Key | Probability |.
     The properties computed are:
         - Sequence of Keys (e.g. ["G","A","B"...])
         - Number of measure (an Int array with the number of measure)
@@ -450,11 +481,16 @@ end
           for each key in the key distances)
         - Average Uncertainty
         - Key entropy for the piece, computed for the distribution of keys in the piece.
-        - Array of probability distributions of the key distances, computed as p(x) = exp(-x) and normalized.
+        - Array of probability distributions of the keys;
+          if is given distances the probabilites are computed as p(x) = exp(-x) and normalized.
 """
-function get_kseq_properties(key_seqs)
-    p_distros = get_distance_dists(key_seqs)
-
+function get_kseq_properties(key_seqs; p_distance=true)
+    if p_distance
+        p_distros = get_distance_dists(key_seqs)
+        dk_seq_ent = get_distance_seq_entropy(key_seqs)
+    else
+        p_distros, dk_seq_ent = get_kseq_pdent(key_seqs)
+    end
     n_k_s = get_KS(key_seqs)
 
     chord_n = convert(Array{String,1},n_k_s)
@@ -463,15 +499,68 @@ function get_kseq_properties(key_seqs)
     p_keys = collect(values(D))./sum(collect(values(D)))
     ent_dseq = mapreduce(x-> -x*log2(x),+,p_keys)
 
-    dk_seq_ent = get_distance_seq_entropy(key_seqs)
+
     n_mea = [i for i = 1:length(chord_n)]
     av_e = mean(filter(x-> !isnan(x),dk_seq_ent))
     return chord_n, n_mea, dk_seq_ent, av_e, ent_dseq, p_distros
 end
 
 
+function get_key_sequence_old(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
+    ptcs = notes_chunk[:,4] #Pitches
+    durs = notes_chunk[:,3] #durations
+    pbeat = notes_chunk[:,1] #beat where the note starts
+    beat_w = ones(length(durs)) #array of the beat weights
+    for b = 1:length(sbeat_w[1])
+        loc_b = findall(x-> x==sbeat_w[1][b], pbeat) #finding all notes that start at beat sbeat_w[1][b]
+        beat_w[loc_b] .= sbeat_w[2][b] #this is the weight.
+    end
+    notas, n_we = get_local_lin_w(ptcs, lin_w) #doing the linear weight in the pitches
+    ii = vcat(map(x-> findall(y-> y==x, notas), ptcs)...)
+    #println(ptcs)
+    b_wei = n_we[ii] #getting the linear weight for every note i n the array of pitches
+    if mod_12
+        spi_ix = get_cfpitch_mod12(ptcs)
+        #println("WARNING! \n Doing module 12 notes.")
+    else
+        spi_ix = get_cfpitch(ptcs)
+            # max_dif = 10
+            # while max_dif > 6
+            #     nex_seq = reorder_seq_closest(spi_ix)
+            #     max_dif = maximum(map(x-> abs(x),diff(nex_seq)))
+            #     spi_ix = nex_seq
+            # end
+    end
+    spi_p = map(x-> get_pitch(x, r=r, h=h), spi_ix) #getting the location (x,y,z) for each pitch
+    t_ws = map((x,y,z)-> x*y*z, beat_w,durs, b_wei) #computing the total weights
+    cv_i = map((x,y)-> x*y, t_ws, spi_p) / sum(t_ws) #computing the location of the pitches with their relative weights
+
+    c_i = sum(cv_i) #finding the center of effect
+
+    d_to_keys = map(x-> euclidean(c_i, x)^2, pos_all_keys) #computing the eclidean distance to all keys
+
+    ranking = sortperm(d_to_keys) #ranking the distances from the closest to the farthest
+
+    return c_i, [all_keys[ranking] d_to_keys[ranking]], [notes_chunk midi_note_names[ptcs.+1] spi_ix beat_w b_wei t_ws]
+end
 ################################################################################
 #####TOOLS
+
+
+"""
+    get_kseq_pdent(key_seqs)
+
+    Returns the probabilities and the entropies of a key sequence (Array of tables):
+    | Key | Probability | using Shannon definition in module 2.
+"""
+function get_kseq_pdent(key_seqs)
+    pd = []; entro = []
+    for i = 1:length(key_seqs)
+        push!(pd, key_seqs[i][:,2])
+        push!(entro, mapreduce(x-> -x*log2(x),+,key_seqs[i][:,2]))
+    end
+    return pd, entro
+end
 """
     reorder_seq_closest(ex_seq)
 
@@ -664,7 +753,41 @@ function get_freq(s)
     return T
 end
 
+"""
+    get_rank_freq(series)
 
+    Returns a 2-Dimensional Array of symbols and their respective frequencies
+    from a series of data. The output is ordered by rank (most to least frequent).
+"""
+function get_rank_freq(series)
+    tam = length(series)
+    M = Dict{Any,Int64}()
+    for i = 1:tam
+        M[series[i]] = get(M, series[i], 0) + 1
+    end
+    dist = sort(collect(M), by = tuple -> last(tuple), rev=true)
+    rf = Array{Any}(undef, length(dist),2)
+    for i = 1:length(dist)
+        rf[i,1] = dist[i][1]; rf[i,2] = dist[i][2]
+    end
+    return rf
+end
+
+"""
+    get_hamming_distance(s1,s2)
+
+    Returns the Hamming distance between two sequences (Arrays of any type),
+    only works for arrays of the same lenght.
+"""
+function get_hamming_distance(s1,s2)
+    if length(s1) != length(s2)
+        println("STRINGS ARE NOT SAME LENGHT!!!!")
+        return NaN
+    else
+        h_d = sum([s1[i] != s2[i] for i = 1:length(s1)])
+    end
+    return h_d
+end
 ################################################################################
 #Stochastic functions
 function get_tran_mat(seq)
