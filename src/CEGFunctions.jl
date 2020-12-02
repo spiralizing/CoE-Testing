@@ -4,6 +4,10 @@
 pitch_names = ["C","G","D","A","E","B","Gb/F#","Db","Ab","Eb","Bb","F"]
 nMajor_keys = ["C", "G", "D", "A","E", "B/Cb","Gb/F#","Db/C#","Ab","Eb", "Bb","F"]
 nminor_keys = ["c","g","d","a","e","b","f#","c#","g#","eb/d#","bb","f"]
+nall_keys = [] #All keys
+for (a,b) in zip(nminor_keys,nMajor_keys)
+    push!(nall_keys,a); push!(nall_keys,b)
+end
 cf_notes = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5]
 midi_notes = ["C","C#","D","Eb","E","F","F#","G","G#","A","Bb","B"]
 #the real value of the notes in the circle of fifths, chromatic scale representation from C = 0 to B = 11
@@ -177,10 +181,12 @@ function get_piece_by_measure(s; qdiv=32)
     for i = 1:length(measure)
         push!(notes_measure,cumsum([subdiv[i] for j=1:numer[i]]))
     end
+    n_off = findall(x-> x==" Note_off_c",s[:,3])
+    n_on = findall(x-> x==" Note_on_c",s[:,3])
     #next lines are to get the time in miliseconds when the pitch starts and ends.
     if nv ==1
         #nv = 1
-        if isempty(findall(x-> x==" Note_off_c",s[:,3]))
+        if isempty(n_off) || length(n_off) < length(n_on)/2
             b = s[s[:,1].==1,:] #takes the events of the voice i
             mat = b[b[:,3].==" Note_on_c", :]
             mat = mat[findall(x->x!="", mat[:,5]),:]
@@ -192,11 +198,11 @@ function get_piece_by_measure(s; qdiv=32)
         end
     else
         voces = Array{Matrix}(undef,nv) #initialze an array
-        if isempty(findall(x-> x==" Note_off_c",s[:,3]))
+        if isempty(n_off) || length(n_off) < length(n_on)/2
             #checks if the midi has events of note_off
             for i = 1:(nv) #if does not, it construct the series in this way
                 b = s[s[:,1].==i,:] #takes the events of the voice i
-                if size(b[b[:,3].==" Note_on_c", :])[1] == 0; continue; end #checks if there are notes in the channel
+                #if size(b[b[:,3].==" Note_on_c", :])[1] == 0; continue; end #checks if there are notes in the channel
                 mat = b[b[:,3].==" Note_on_c", :]
                 mat = mat[findall(x->x!="", mat[:,5]),:]
                 voces[i] =  get_onon_notes(mat)#construct an array of information of initial time, finish time, pitch and intensity.
@@ -365,10 +371,15 @@ function get_piece_by_measure(s; qdiv=32)
     residues = map(x-> modf(x)[1], all_divis)
     n_off = length(findall(x-> x > 10^-6, residues))
     res_frac = n_off / length(residues)
+    if number_measures > 1
+        out_measures = vcat(chunked_voice...)
+    else
+        out_measures = chunked_voice
+    end
     if res_frac > 0.05
         println("WARNING!!! \n THE FRACTION OF NOTES FALLING OUTSIDE THE MIDI CLOCK IS: $(res_frac)")
     end
-    return filter(x-> !isempty(x),chunked_voice), [length(residues) n_off]
+    return filter(x-> !isempty(x),out_measures), [length(residues) n_off]
 end
 
 """
@@ -449,7 +460,6 @@ end
     get_key_sequence function for a random shuffle version of the original set of notes, after that it returns the
     frequency distribution of the closest keys and the average distance to that key.
 """
-
 function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
     key_list = Array{Any}(undef, n_iter,2)
     for t=1:n_iter
@@ -790,7 +800,7 @@ function get_hamming_distance(s1,s2)
 end
 ################################################################################
 #Stochastic functions
-function get_tran_mat(seq)
+function get_tran_mat(seq; normed=false)
     token_ref = unique(seq)
     T_M = zeros(Int64, length(token_ref), length(token_ref))
     for i = 1:length(seq)-1
@@ -899,7 +909,7 @@ function get_novelty_measure(piece, Om, N_cws)
     return ν_ξ / s_m #dividing by the size of the piece
 end
 
-function get_novelty_measure(piece, Om, N_cws)
+function get_novelty_measure(piece, Om, N_cws; nov_w=1)
     ν_ξ = 0 #the value for the novelty of piece ξ
     ξ = piece
     Ω = collect(keys(Om)) #conventional pool
@@ -918,14 +928,14 @@ function get_novelty_measure(piece, Om, N_cws)
             s_γ = length(γ_a) #number of pairs that start with γ_1 in novelty pool.
         end
         for e in γ_Ω  #looping over elements that start with γ_1 in the conventional pool
-            s_γ += Om[Ω[e]]  #number of pairs in the conventional pool
+            s_γ += Om[Ω[e]] #number of pairs in the conventional pool
         end
-        s_γ += N_cws
+        s_γ += N_cws * nov_w #number of different keys the current key can go to.
         ix = findall(x->x==k,Ω) #finding the element k in the conventional pool
         if isempty(ix)
-            ν_ξ += ξ[k] * log10(s_γ)  #this is the case when the element is a novelty
+            ν_ξ += ξ[k]  * log10(s_γ / nov_w)  #this is the case when the element is a novelty
         else
-            ν_ξ += ξ[k] * log10(s_γ / (Om[Ω[ix[1]]] + 1) ) #when the element is in the conventional pool
+            ν_ξ += ξ[k] * log10((s_γ+nov_w) / (Om[Ω[ix[1]]] + nov_w) ) #when the element is in the conventional pool
         end
     end
     return ν_ξ / s_m #dividing by the size of the piece

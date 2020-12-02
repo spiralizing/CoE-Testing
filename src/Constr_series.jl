@@ -7,11 +7,7 @@ function indice(tmax::Int64) #esta funcion solo regresa el arreglo que lleva el 
 end
 
 function filter_undef!(voces)
-    nv = size(voces)[1]
-    tt = Array{Bool}(undef,nv)
-    for i=1:nv
-        tt[i] = isassigned(voces,i)
-    end
+    tt = map(x-> isassigned(x), voces)
     deleteat!(voces,findall(x->x==false,tt))
 end
 
