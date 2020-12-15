@@ -1,13 +1,25 @@
 #Stochastic functions
+"""
+    get_markov_pairs(c)
+
+    Returns the counts for the elements and pairs of consecutive elements of
+    a given sequence c.
+
+    The output are two dictionaries, each of them having symbols as keys
+    and counts as values.
+"""
 function get_markov_pairs(c)
+    #Tm = Dict{Any,Int64}()
     T = Dict{Any,Int64}()
     xy = join(["***" c[1]], "+") #first element.
     T[xy] = get(T, xy,0) + 1
+    #Tm[c[1]] = get(Tm,c[1],0)+1
     for i = 1:length(c)-1
+        #Tm[c[i+1]] = get(Tm,c[i+1],0)+1
         xy = join([c[i] c[i+1]],"+")
         T[xy] = get(T, xy,0) + 1
     end
-    return T
+    return T# Tm
 end
 
 """
