@@ -49,7 +49,7 @@ end
     The variable p_nov is the chance of generating a new state -e.g. a transition to
     a state never visited before-
 """
-function gen_rwalk_seq(T_M, t_max; p_nov=0.0, i_state=0)
+function gen_rwalk_seq(T_M, t_max, tokens; p_nov=0.0, i_state=0)
     #t_list = findall(x-> x!=0, T_M) #looks at the transitions already created.
     states = first.(Tuple.(findall(!iszero,T_M)))
     if i_state == 0
@@ -58,8 +58,10 @@ function gen_rwalk_seq(T_M, t_max; p_nov=0.0, i_state=0)
         p_i = i_state
     end
     seq = zeros(Int64,t_max)
+    t_seq = []
     for i = 1:t_max
         seq[i] = p_i
+        push!(t_seq, tokens[p_i])
         flip = rand() #flipping a coin for the creation of a novelty
         if flip <= p_nov
             t_ij = findall(x -> x==0, T_M[p_i,:]) #finding a new transition.
@@ -87,12 +89,12 @@ function gen_rwalk_seq(T_M, t_max; p_nov=0.0, i_state=0)
             end
         end
     end
-    return seq
+    return seq, t_seq
 end
 
 
 function get_tran_mat(seq; normed=false)
-    token_ref = unique(seq)
+    token_ref = sort(unique(seq))
     T_M = zeros(Int64, length(token_ref), length(token_ref))
     for i = 1:length(seq)-1
         x1 = findfirst(isequal(seq[i]), token_ref)

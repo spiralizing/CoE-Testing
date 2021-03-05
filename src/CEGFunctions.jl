@@ -103,6 +103,62 @@ function get_cfpitch(pitch_seq)
     return map(y->findfirst(x->x==y,all_cf_notes)-1,pitch_seq)
 end
 
+isminor(s) = occursin(r"^[a-z,#,/,\s]+$",s)
+
+#functional harmony sequence; sequence of the relative key from a given global key in roman numerals.
+function funhar_seq(kseq, fun_key)
+    fh_kseq = []
+    if isminor(fun_key)
+        nk = findfirst(x-> x==fun_key, nminor_keys)
+    else
+        nk = findfirst(x-> x==fun_key, nMajor_keys)
+    end
+    minork = circshift(nminor_keys, 13-nk) 
+    majork = circshift(nMajor_keys, 13-nk)
+    for k = 1:length(kseq)
+        if isminor(kseq[k])
+            pos = findfirst(x-> x==kseq[k],minork) - 1
+            push!(fh_kseq, Minor_RN[pos])
+        else
+            pos = findfirst(x-> x== kseq[k],majork) - 1
+            push!(fh_kseq, Major_RN[pos])
+        end
+    end
+    return fh_kseq
+end
+##--
+
+#handwritting the functional harmony notations "key or chord relative to the fundamental"
+#Major roman numerals, for the coe notation.
+Major_RN = Dict(0 => "I", 
+    7 =>"I#/IIb",
+    2 => "II",
+    9 => "II#/IIIb",
+    4 => "III",
+    #"III#/IVb" = 11
+    11 => "IV",
+    6 => "IV#/Vb",
+    1 => "V",
+    8 => "V#/VIb",
+    3 => "VI",
+    10 => "VI#/VIIb",
+    5 => "VII",
+   )
+##--
+Minor_RN = Dict(0 => "i", 
+    7 =>"i#/iib",
+    2 => "ii",
+    9 => "ii#/iiib",
+    4 => "iii",
+    #"III#/IVb" = 11
+    11 => "iv",
+    6 => "iv#/vb",
+    1 => "v",
+    8 => "v#/vib",
+    3 => "vi",
+    10 => "vi#/viib",
+    5 => "vii",
+   )
 #defining all locations for the array for the "circle of fifths" going up and down, taking C as k=0
 notes = [i for i=0:127]
 pitches = map(x-> get_pitch(x), notes)
@@ -140,7 +196,7 @@ all_keys = vcat(all_Major_keys,all_minor_keys)
 midi_note_names = vcat(midi_note_names...)
 
 """
-    get_piece_by_measure(s; qdiv=32)
+    get_piece_by_measure(s; qdiv=32, abs_time=true)
 
     Returns a vector of two dimensional arrays of the basic information of the piece for analyzing its properties,
     input "s" should be a CSV table from a CSV file converted from a MIDI file with the midicsv script available for free
@@ -148,14 +204,15 @@ midi_note_names = vcat(midi_note_names...)
 
     The first output consist of a vector which components represent each measure of the music piece,
     each measure contains four columns; Beat: number of beat where the note starts (beat or halfbeat)
-    Measure: the fraction of the measure (n/d), Duration: the duration of the note in midiclocks,
+    Measure: the fraction of the measure (n/d), Duration: the duration of the note in midiclocks, if abs_time=true
+    the output returns the time in ms where the note started and ended before the duration of the note,
     Pitch: the pitch of the note represented in MIDI notation (0-127).
 
     The second output corresponds to the total number of notes in the piece and the number of notes that
     fall outside the threshold given (1/qdiv), most of the time if notes fall outside this threshold is because
     the MIDI was sequenced (recorded) instead of generated with a music score software.
 """
-function get_piece_by_measure(s; qdiv=32)
+function get_piece_by_measure(s; qdiv=32, abs_time=true)
     frac = s[findall(x-> x == " Time_signature", s[:,3]),2:5]  #this is the measure of the piece in fractional way a / b
     if length(frac) > 4
         bot = map(x ->  2^x ,frac[:,4])
@@ -268,7 +325,11 @@ function get_piece_by_measure(s; qdiv=32)
                     push!(all_divis, dif*smdiv)
                     #println("Pitch: $(pitc[z])",'\t',"Starting time in piece (midi clock): $(st_times[z]), in the measure:$(in_times[z]) ",'\t',"Ratio Starting/LengthBeat: $(divis)",'\t',"Selected starting beat (in measure): $(loc[z])")
                 end
-                push!(chunked_meas, [loc num_n dur all_v[in_notes,3]])
+                if abs_time
+                    push!(chunked_meas, [loc num_n all_v[in_notes,1:2] dur all_v[in_notes,3]])
+                else
+                    push!(chunked_meas, [loc num_n all_v[in_notes,3] dur])
+                end
             end
             #next lines are for the last measure or the last fraction left.
 
@@ -299,7 +360,11 @@ function get_piece_by_measure(s; qdiv=32)
                     push!(all_divis, dif*smdiv)
                     #println("Pitch: $(pitc[z])",'\t',"Starting time in piece (midi clock): $(st_times[z]), in the measure:$(in_times[z]) ",'\t',"Ratio Starting/LengthBeat: $(divis)",'\t', "Ratio Decimals multiplied by 32: $(dif*smdiv)")#"Selected starting beat (in measure): $(loc[z])")
                 end
-                push!(chunked_meas,[loc num_n dur all_v[in_notes,3]])
+                if abs_time
+                    push!(chunked_meas, [loc num_n all_v[in_notes,1:2] dur all_v[in_notes,3]]) #returns also the values for the absolute time in ms when the note started and when it ended
+                else
+                    push!(chunked_meas, [loc num_n all_v[in_notes,3] dur])
+                end
             end
             push!(chunked_voice, chunked_meas)
         end
@@ -332,7 +397,12 @@ function get_piece_by_measure(s; qdiv=32)
                 push!(all_divis, dif*smdiv)
                 #println("Pitch: $(pitc[z])",'\t',"Starting time in piece (midi clock): $(st_times[z]), in the measure:$(in_times[z]) ",'\t',"Ratio Starting/LengthBeat: $(divis)",'\t',"Selected starting beat (in measure): $(loc[z])")
             end
-            push!(chunked_voice,[loc num_n dur all_v[in_notes,3]])
+            if abs_time
+                push!(chunked_voice,[loc num_n all_v[in_notes,1:2] dur all_v[in_notes,3]])
+            else
+                push!(chunked_voice,[loc num_n all_v[in_notes,3] dur])
+            end
+                
         end
         if w_res > 0
             st = n_chunks*w_s
@@ -363,7 +433,11 @@ function get_piece_by_measure(s; qdiv=32)
                     push!(all_divis, dif*smdiv)
                     #println("Pitch: $(pitc[z])",'\t',"Starting time in piece (midi clock): $(st_times[z]), in the measure:$(in_times[z]) ",'\t',"Ratio Starting/LengthBeat: $(divis)",'\t', "Ratio Decimals multiplied by 32: $(dif*smdiv)")#"Selected starting beat (in measure): $(loc[z])")
                 end
-                push!(chunked_voice,[loc num_n dur all_v[in_notes,3]])
+                if abs_time
+                    push!(chunked_voice,[loc num_n all_v[in_notes,1:2] dur all_v[in_notes,3]])
+                else
+                    push!(chunked_voice,[loc num_n all_v[in_notes,3] dur])
+                end
             end
         end
     end
@@ -409,8 +483,8 @@ end
     Default value is no extra weight, sbeat_w = [[1.],[1.]].
 """
 function get_key_sequence(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
-    ptcs = notes_chunk[:,4] #Pitches
-    durs = notes_chunk[:,3] #durations
+    ptcs = notes_chunk[:,6] #Pitches
+    durs = notes_chunk[:,5] #durations
     pbeat = notes_chunk[:,1] #beat where the note starts
     beat_w = ones(length(durs)) #array of the beat weights
     for b = 1:length(sbeat_w[1])
@@ -461,9 +535,13 @@ end
     frequency distribution of the closest keys and the average distance to that key.
 """
 function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
+    n_pitches = size(notes_chunk,1)
+    if n_pitches < 7
+        n_iter = factorial(n_pitches)
+    end
     key_list = Array{Any}(undef, n_iter,2)
     for t=1:n_iter
-        ixes = [j for j=1:size(notes_chunk,1)]
+        ixes = [j for j=1:n_pitches]
         f_m = notes_chunk[shuffle(ixes),:]
         m_key = get_key_sequence(f_m, mod_12=mod_12,r=r,h=h,all_keys=all_keys,pos_all_keys=pos_all_keys,sbeat_w=sbeat_w,lin_w=lin_w)[2][1,:]
         key_list[t,1] = m_key[1]; key_list[t,2] = m_key[2]
@@ -494,7 +572,7 @@ end
         - Array of probability distributions of the keys;
           if is given distances the probabilites are computed as p(x) = exp(-x) and normalized.
 """
-function get_kseq_properties(key_seqs; p_distance=true)
+function get_kseq_properties(key_seqs; p_distance=false)
     if p_distance
         p_distros = get_distance_dists(key_seqs)
         dk_seq_ent = get_distance_seq_entropy(key_seqs)
@@ -509,12 +587,86 @@ function get_kseq_properties(key_seqs; p_distance=true)
     p_keys = collect(values(D))./sum(collect(values(D)))
     ent_dseq = mapreduce(x-> -x*log2(x),+,p_keys)
 
-
-    n_mea = [i for i = 1:length(chord_n)]
     av_e = mean(filter(x-> !isnan(x),dk_seq_ent))
-    return chord_n, n_mea, dk_seq_ent, av_e, ent_dseq, p_distros
+    return chord_n,  dk_seq_ent, av_e, ent_dseq
 end
+"""
+    get_kseq_randomized(measures)
 
+    Given a set of group of notes, it computes the most likely key for each set in a stochastic fashion.
+    
+    Returns a list of keys, list of uncertanty values for the key sequence, mean uncertainty and
+    the Entropy for the key distribution in the piece (set of group of notes).
+
+    For more details see function get_kseq_properties
+
+"""
+function get_kseq_randomized(measures)
+    keys = []
+    for i = 1:length(measures)
+        push!(keys,get_rand_key_sequence(measures[i])[:,1:2])
+    end
+    return get_kseq_properties(keys)
+end
+##--
+"""
+    divide_measure(notes_chunk)
+
+    Returns a measure divided by beat, it does not take the full lenght
+    for each note if the note is longer than the beat.
+    
+"""
+function divide_measure(notes_chunk)
+    t_sig = notes_chunk[:,2]
+    n_win = parse(Int64,split(t_sig[1],"/")[1])
+    ptcs = notes_chunk[:,6] #Pitches
+    durs = notes_chunk[:,5] #durations
+    pbeat = notes_chunk[:,1] #beat where the note starts
+    ini = notes_chunk[:,3]
+    fin = notes_chunk[:,4]
+    #we need to divide the measure into the number of notes (in the denominator)
+    tam_win = (maximum(fin) - minimum(ini))/n_win #size of the window (per beat)
+    sub_chunks = []
+
+    r_ini = ini.-ini[1]
+    r_fin = fin.-ini[1]
+
+    for nw in 0:(n_win-1)
+        sub_t = []
+        ini_win = nw * tam_win 
+        fin_win = nw * tam_win + tam_win
+        ix_n = unique(vcat(findall(x-> x < fin_win && x>= ini_win, r_ini),findall(x-> x<= fin_win && x>ini_win, r_fin)))
+        #println(ix_n," window $(nw+1)")
+        if isempty(ix_n)
+            ix = intersect(findall(x-> x>fin_win, r_fin),findall(x-> x<ini_win, r_ini))
+            if isempty(ix) continue; end
+            #println("$ix window $(nw+1)")
+            for p in ix
+                push!(sub_t, [pbeat[p] t_sig[p] ini[p] fin[p] tam_win ptcs[p]])
+            end
+        else
+            for p in ix_n
+                #println("window number $(nw+1)")
+                #println(r_ini[p],"\t",r_fin[p], "\t", ini_win,"\t", fin_win)
+                if r_fin[p] <= fin_win
+                    if r_ini[p]< ini_win #starts before the beat
+                        push!(sub_t, [pbeat[p] t_sig[p] ini[p] fin[p] r_fin[p] - ini_win ptcs[p]]) #case it finishes before or in the beat
+                    else
+                        push!(sub_t, [pbeat[p] t_sig[p] ini[p] fin[p] r_fin[p] - r_ini[p] ptcs[p]])
+                    end
+                else
+                    if r_ini[p] < ini_win
+                        push!(sub_t, [pbeat[p] t_sig[p] ini[p] fin[p] fin_win - ini_win ptcs[p]]) #case it is longer than the beat
+                    else
+                        push!(sub_t, [pbeat[p] t_sig[p] ini[p] fin[p] fin_win - r_ini[p] ptcs[p]])
+                    end
+                end
+            end
+        end
+        push!(sub_chunks, vcat(sub_t...))
+    end
+    return sub_chunks
+end
 
 function get_key_sequence_old(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
     ptcs = notes_chunk[:,4] #Pitches
