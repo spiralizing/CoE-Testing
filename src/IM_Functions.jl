@@ -121,13 +121,17 @@ end
     with the probabilities computed by the MLE in the pool of previous pieces,
     with a laplacian smoothing over the whole transition space.
 """
-function IC_Piece_Pool(piece, prev_pool, PT_exj)
+function IC_Piece_Pool(piece, prev_pool, PT_exj; normed=true)
     Q_prev = sort(get_tprobs_prev(piece, prev_pool, PT_exj))
     T = collect(values(piece)) #times the transition is made.
     Q = collect(values(Q_prev))
     #information content -Σp(x)
     IC = mapreduce((x,y)-> - y * log10(x), +,Q,T)
-    return IC
+    if normed
+        return IC / sum(T)
+    else
+        return IC
+    end
 end
 
 ###--

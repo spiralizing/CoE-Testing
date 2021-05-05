@@ -1,6 +1,12 @@
 #CENTER OF EFFECT ---- KEY FINDING ALGORITHM
 #This set of functions corresponds to the spiral representations
 #writing the names of the keys, ordered by fifths
+#WARNING!!!!
+#SOME FUNCTIONS NEED THE PACKAGE PyCall AND NEED THE LIBRARY music21 IN THE PYTHON Python_path SEE BELOW
+using PyCall
+m21 = pyimport("music21") 
+####
+###VARIABLES#####
 pitch_names = ["C","G","D","A","E","B","Gb/F#","Db","Ab","Eb","Bb","F"]
 nMajor_keys = ["C", "G", "D", "A","E", "B/Cb","Gb/F#","Db/C#","Ab","Eb", "Bb","F"]
 nminor_keys = ["c","g","d","a","e","b","f#","c#","g#","eb/d#","bb","f"]
@@ -196,7 +202,21 @@ all_keys = vcat(all_Major_keys,all_minor_keys)
 midi_note_names = vcat(midi_note_names...)
 
 """
-    get_piece_by_measure(s; qdiv=32, abs_time=true)
+    function get_piece_by_measure(data; csv=true, qdiv=32, abs_time=true, start_measure=1)
+
+    Returns 
+"""
+
+function get_piece_by_measure(data; csv=true, qdiv=32, abs_time=true, start_measure=1)
+    if csv
+        return get_piece_by_measure_csv(data, qdiv=qdiv, abs_time=abs_time)
+    else
+        return get_piece_by_measure_m21(data, start_measure=start_measure)
+    end
+end
+
+"""
+    get_piece_by_measure_csv(s; qdiv=32, abs_time=true)
 
     Returns a vector of two dimensional arrays of the basic information of the piece for analyzing its properties,
     input "s" should be a CSV table from a CSV file converted from a MIDI file with the midicsv script available for free
@@ -212,7 +232,7 @@ midi_note_names = vcat(midi_note_names...)
     fall outside the threshold given (1/qdiv), most of the time if notes fall outside this threshold is because
     the MIDI was sequenced (recorded) instead of generated with a music score software.
 """
-function get_piece_by_measure(s; qdiv=32, abs_time=true)
+function get_piece_by_measure_csv(s; qdiv=32, abs_time=true)
     frac = s[findall(x-> x == " Time_signature", s[:,3]),2:5]  #this is the measure of the piece in fractional way a / b
     if length(frac) > 4
         bot = map(x ->  2^x ,frac[:,4])
@@ -455,7 +475,80 @@ function get_piece_by_measure(s; qdiv=32, abs_time=true)
     end
     return filter(x-> !isempty(x),out_measures), [length(residues) n_off]
 end
+"""
+    function get_piece_by_measure_m21(m21_data; start_measure=1)
 
+    Returns an array with the information of pitches and duration on each measure in the following format:
+
+    | #measure | time signature | start_quarter | end_quarter | duration (in quarters) | pitch (0-127) |
+"""
+function get_piece_by_measure_m21(m21_data; start_measure=1)
+
+    notes = []
+    for parts in m21_data.parts #getting all the notes in all parts, with duration and pitch
+        for note in parts.flat.notes
+            try 
+                measure = note.measureNumber + (start_measure-1)
+                start = float(note.offset)
+                duration = float(note.quarterLength)
+                pitch = note.pitch.ps
+                push!(notes, [measure start start+duration duration pitch])
+            catch
+                measure = note.measureNumber + (start_measure-1)
+                start = float(note.offset)
+                duration = float(note.quarterLength)
+                for chord_note in note.pitches
+                    pitch = chord_note.ps
+                    push!(notes, [measure start start+duration duration pitch])
+                end
+            end
+        end
+    end
+
+    all_notes = vcat(notes...)
+    n_measures = Int(maximum(all_notes[:,1]))
+    timesig = []
+    lquarters = []
+    for i in 0:n_measures #extracting time signatures
+        try
+            ts = m21_data.parts[1].measure(i).timeSignature
+            push!(timesig,[i ts.ratioString])
+            nquarters = ts.numerator / ts.denominator * 4
+            push!(lquarters, [i nquarters])
+        catch
+        end
+    end
+
+    measures_piece = []
+    if length(timesig) > 1 #if there is more than one time signature
+        for n_ts in 2:length(timesig)
+            last_m = timesig[n_ts][end,1] #get the last measure where the time signature applies 
+            first_m = timesig[n_ts-1][1,1]
+            ix = findall(x-> first_m<=x<=last_m, all_notes[:,1])
+            m_ts = [timesig[n_ts-1][1,2] for i in 1:length(ix)]
+            ini_time = map(x-> mod(x, lquarters[n_ts-1][1,2]+1), all_notes[ix,2])
+            fin_time = map(x-> mod(x, lquarters[n_ts-1][1,2]+1), all_notes[ix,3])
+            push!(measures_piece, [all_notes[ix,1] m_ts ini_time fin_time all_notes[ix,4:end]])
+        end
+        #now last time signature
+        last_m = n_measures
+        first_m = timesig[end][1,1]
+        ix = findall(x-> first_m<=x<=last_m, all_notes[:,1])
+        m_ts = [timesig[end][1,2] for i in 1:length(ix)]
+        ini_time = map(x-> mod(x, lquarters[end][1,2]+1), all_notes[ix,2])
+        fin_time = map(x-> mod(x, lquarters[end][1,2]+1), all_notes[ix,3])
+        push!(measures_piece, [all_notes[ix,1] m_ts ini_time fin_time all_notes[ix,4:end]])
+
+    else
+        ix = all_notes[:,1]
+        m_ts = [timesig[1][1,2] for i in 1:length(ix)]
+        ini_time = map(x-> mod(x, lquarters[1][1,2]+1), all_notes[:,2])
+        fin_time = map(x-> mod(x, lquarters[1][1,2]+1), all_notes[:,3])
+        push!(measures_piece, [all_notes[:,1] m_ts ini_time fin_time all_notes[:,4:end]])
+    end
+    out_measures = vcat(measures_piece...)
+    return out_measures[sortperm(out_measures[:,1]),:]
+end
 """
     get_key_sequence(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,
         all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
@@ -534,8 +627,9 @@ end
     get_key_sequence function for a random shuffle version of the original set of notes, after that it returns the
     frequency distribution of the closest keys and the average distance to that key.
 """
-function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
+function get_rand_key_sequence(notes_chunk; center_effect=false, n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
     n_pitches = size(notes_chunk,1)
+    c_e = []
     if n_pitches < 7
         n_iter = factorial(n_pitches)
     end
@@ -543,7 +637,9 @@ function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_1
     for t=1:n_iter
         ixes = [j for j=1:n_pitches]
         f_m = notes_chunk[shuffle(ixes),:]
-        m_key = get_key_sequence(f_m, mod_12=mod_12,r=r,h=h,all_keys=all_keys,pos_all_keys=pos_all_keys,sbeat_w=sbeat_w,lin_w=lin_w)[2][1,:]
+        out = get_key_sequence(f_m, mod_12=mod_12,r=r,h=h,all_keys=all_keys,pos_all_keys=pos_all_keys,sbeat_w=sbeat_w,lin_w=lin_w)
+        push!(c_e, out[1])
+        m_key = out[2][1,:]
         key_list[t,1] = m_key[1]; key_list[t,2] = m_key[2]
     end
     rf = get_rank_freq(key_list[:,1])
@@ -554,11 +650,15 @@ function get_rand_key_sequence(notes_chunk; n_iter=1000,r=1, h=sqrt(2/15), mod_1
         mv = mean(key_list[findall(x-> x==rf[i,1], key_list[:,1]),2])
         k_vals[i,1] = rf[i,1]; k_vals[i,2] = rf[i,2] / t_count; k_vals[i,3] = mv
     end
-    return k_vals
+    if center_effect
+        return c_e, k_vals
+    else
+        return k_vals
+    end
 end
 
 """
-    get_kseq_properties(key_seqs; p_distance=true)
+    get_kseq_properties(key_seqs; p_distance=false)
 
     Returns properties computed from a sequence of keys: An array of tables | Key | Distance | if p_distance is true
     if p_distance is false the imput should have the probabilities instead of distances | Key | Probability |.
