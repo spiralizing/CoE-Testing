@@ -9,7 +9,7 @@ m21 = pyimport("music21")
 ###VARIABLES#####
 pitch_names = ["C","G","D","A","E","B","Gb/F#","Db","Ab","Eb","Bb","F"]
 nMajor_keys = ["C", "G", "D", "A","E", "B/Cb","Gb/F#","Db/C#","Ab","Eb", "Bb","F"]
-nminor_keys = ["c","g","d","a","e","b","f#","c#","g#","eb/d#","bb","f"]
+nminor_keys = ["c","g","d","a","e","b","f#","c#","g#/ab","eb/d#","bb","f"]
 nall_keys = [] #All keys
 for (a,b) in zip(nminor_keys,nMajor_keys)
     push!(nall_keys,a); push!(nall_keys,b)
@@ -137,32 +137,32 @@ end
 #handwritting the functional harmony notations "key or chord relative to the fundamental"
 #Major roman numerals, for the coe notation.
 Major_RN = Dict(0 => "I", 
-    7 =>"I#/IIb",
+    7 =>"#I/bII",
     2 => "II",
-    9 => "II#/IIIb",
+    9 => "#II/bIII",
     4 => "III",
     #"III#/IVb" = 11
     11 => "IV",
-    6 => "IV#/Vb",
+    6 => "#IV/bV",
     1 => "V",
-    8 => "V#/VIb",
+    8 => "#V/bVI",
     3 => "VI",
-    10 => "VI#/VIIb",
+    10 => "#VI/bVII",
     5 => "VII",
    )
 ##--
 Minor_RN = Dict(0 => "i", 
-    7 =>"i#/iib",
+    7 =>"#i/bii",
     2 => "ii",
-    9 => "ii#/iiib",
+    9 => "#ii/biii",
     4 => "iii",
     #"III#/IVb" = 11
     11 => "iv",
-    6 => "iv#/vb",
+    6 => "#iv/bv",
     1 => "v",
-    8 => "v#/vib",
+    8 => "#v/bvi",
     3 => "vi",
-    10 => "vi#/viib",
+    10 => "#vi/bvii",
     5 => "vii",
    )
 #defining all locations for the array for the "circle of fifths" going up and down, taking C as k=0
