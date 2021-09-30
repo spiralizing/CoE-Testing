@@ -109,9 +109,18 @@ function get_cfpitch(pitch_seq)
     return map(y->findfirst(x->x==y,all_cf_notes)-1,pitch_seq)
 end
 
-isminor(s) = occursin(r"^[a-z,#,/,\s]+$",s)
-
+function isminor(s::Any) 
+    return occursin(r"^[a-z,#,/,\s]+$",s)
+end
+function isminor(k_seq::Array{Any,1})
+    gkey = get_rank_freq(k_seq)[1,1]
+    return occursin(r"^[a-z,#,/,\s]+$",gkey)
+end
 #functional harmony sequence; sequence of the relative key from a given global key in roman numerals.
+"""
+    funhar_seq(kseq, fun_key)
+    Returns a sequence of Roman numerals given a reference for the Tonic Key.
+"""
 function funhar_seq(kseq, fun_key)
     fh_kseq = []
     if isminor(fun_key)
@@ -200,6 +209,52 @@ all_Major_keys = vcat(all_Major_keys...)
 all_minor_keys = vcat(all_minor_keys...)
 all_keys = vcat(all_Major_keys,all_minor_keys)
 midi_note_names = vcat(midi_note_names...)
+
+"""
+    function get_coe_path(notes_chunk)
+
+    Returns the path of the center of effect for a given set of notes.
+"""
+
+function get_coe_path(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
+    ptcs = notes_chunk[:,6] #Pitches
+    durs = notes_chunk[:,5] #durations
+    pbeat = notes_chunk[:,1] #beat where the note starts
+    beat_w = ones(length(durs)) #array of the beat weights
+    for b = 1:length(sbeat_w[1])
+        loc_b = findall(x-> x==sbeat_w[1][b], pbeat) #finding all notes that start at beat sbeat_w[1][b]
+        beat_w[loc_b] .= sbeat_w[2][b] #this is the weight.
+    end
+    notas, n_we = get_local_lin_w(ptcs, lin_w) #doing the linear weight in the pitches
+    ii = vcat(map(x-> findall(y-> y==x, notas), ptcs)...)
+    #println(ptcs)
+    b_wei = n_we[ii] #getting the linear weight for every note i n the array of pitches
+    if mod_12
+        mod12_seq = get_cfpitch_mod12(ptcs)
+        spi_ix = reorder_seq_closest(mod12_seq).+12
+        #println("WARNING! \n Doing module 12 notes.")
+    else
+        spi_ix = get_cfpitch(ptcs)
+        if length(spi_ix) > 1
+            max_dif = 10
+            while max_dif > 6
+                nex_seq = reorder_seq_closest(spi_ix)
+                max_dif = maximum(map(x-> abs(x),diff(nex_seq)))
+                spi_ix = nex_seq
+            end
+        end
+    end
+    spi_p = map(x-> get_pitch(x, r=r, h=h), spi_ix) #getting the location (x,y,z) for each pitch
+    t_ws = map((x,y,z)-> x*y*z, beat_w,durs, b_wei) #computing the total weights
+    
+    cv_i = []
+    #cv_i = map((x,y)-> x*y, t_ws, spi_p) / sum(t_ws) #computing the location of the pitches with their relative weights
+    for i in 1:length(spi_p)
+        push!(cv_i, map((x,y)-> x*y, t_ws[1:i],spi_p[1:i])/sum(t_ws[1:i]))  
+    #c_i = sum(cv_i) #finding the center of effect
+    end
+    return map(x-> sum(x),cv_i)
+end
 
 """
     function get_piece_by_measure(data; csv=true, qdiv=32, abs_time=true, start_measure=1)
@@ -520,7 +575,26 @@ function get_piece_by_measure_m21(m21_data; start_measure=1)
     end
 
     measures_piece = []
-    if length(timesig) > 1 #if there is more than one time signature
+    if length(timesig) > 1
+        for n_ts in 2:length(timesig)
+            last_m = timesig[n_ts][end,1] #get the last measure where the time signature applies 
+            first_m = timesig[n_ts-1][1,1]
+            ix = findall(x-> first_m<=x<=last_m, all_notes[:,1])
+            m_ts = [timesig[n_ts-1][1,2] for i in 1:length(ix)]
+            push!(measures_piece, [all_notes[ix,1] m_ts all_notes[ix, 2:end]])
+        end
+        #now last time signature
+        last_m = n_measures
+        first_m = timesig[end][1,1]
+        ix = findall(x-> first_m<=x<=last_m, all_notes[:,1])
+        m_ts = [timesig[end][1,2] for i in 1:length(ix)]
+        push!(measures_piece, [all_notes[ix,1] m_ts all_notes[ix, 2:end]])
+    else
+        ix = all_notes[:,1]
+        m_ts = [timesig[1][1,2] for i in 1:length(ix)]
+        push!(measures_piece, [all_notes[:,1] m_ts all_notes[:,2:end]])
+    end
+#=     if length(timesig) > 1 #if there is more than one time signature
         for n_ts in 2:length(timesig)
             last_m = timesig[n_ts][end,1] #get the last measure where the time signature applies 
             first_m = timesig[n_ts-1][1,1]
@@ -545,7 +619,7 @@ function get_piece_by_measure_m21(m21_data; start_measure=1)
         ini_time = map(x-> mod(x, lquarters[1][1,2]+1), all_notes[:,2])
         fin_time = map(x-> mod(x, lquarters[1][1,2]+1), all_notes[:,3])
         push!(measures_piece, [all_notes[:,1] m_ts ini_time fin_time all_notes[:,4:end]])
-    end
+    end =#
     out_measures = vcat(measures_piece...)
     return out_measures[sortperm(out_measures[:,1]),:]
 end
@@ -647,8 +721,8 @@ function get_rand_key_sequence(notes_chunk; center_effect=false, n_iter=1000,r=1
     t_count = sum(rf[:,2])
     k_vals = Array{Any}(undef, n_keys,3)
     for i = 1:n_keys
-        mv = mean(key_list[findall(x-> x==rf[i,1], key_list[:,1]),2])
-        k_vals[i,1] = rf[i,1]; k_vals[i,2] = rf[i,2] / t_count; k_vals[i,3] = mv
+        m_v = mean(key_list[findall(x-> x==rf[i,1], key_list[:,1]),2])
+        k_vals[i,1] = rf[i,1]; k_vals[i,2] = rf[i,2] / t_count; k_vals[i,3] = m_v
     end
     if center_effect
         return c_e, k_vals
