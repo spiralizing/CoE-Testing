@@ -23,6 +23,7 @@ midi_notes = ["C","C#","D","Eb","E","F","F#","G","G#","A","Bb","B"]
 # u = v = o = w
 # a = 0.75
 # b = 0.75
+h_octav = 4.3818
 """
     get_pitch(k; r=1, h=sqrt(2/15))
 
@@ -187,21 +188,25 @@ midi_note_names = []
 all_cf_notes = []
 all_Major_keys = []
 all_minor_keys = []
+all_pitch_names = []
 push!(all_cf_notes, cf_notes)
 push!(all_Major_keys, nMajor_keys)
 push!(all_minor_keys, nminor_keys)
 push!(midi_note_names, midi_notes)
+push!(all_pitch_names, pitch_names)
 
 for i = 1:9
     push!(all_cf_notes, cf_notes.+(12*i))
     push!(all_Major_keys, nMajor_keys)
     push!(all_minor_keys, nminor_keys)
     push!(midi_note_names, midi_notes)
+    push!(all_pitch_names, pitch_names)
 end
 push!(all_cf_notes, cf_notes[1:8].+(120))
 push!(all_Major_keys, nMajor_keys[1:8])
 push!(all_minor_keys, nminor_keys[1:8])
 push!(midi_note_names, midi_notes[1:8])
+push!(all_pitch_names, pitch_names[1:8])
 
 
 all_cf_notes = vcat(all_cf_notes...)
@@ -209,6 +214,7 @@ all_Major_keys = vcat(all_Major_keys...)
 all_minor_keys = vcat(all_minor_keys...)
 all_keys = vcat(all_Major_keys,all_minor_keys)
 midi_note_names = vcat(midi_note_names...)
+all_pitch_names = vcat(all_pitch_names...)
 
 """
     function get_coe_path(notes_chunk)
@@ -704,7 +710,9 @@ end
 function get_rand_key_sequence(notes_chunk; center_effect=false, n_iter=1000,r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
     n_pitches = size(notes_chunk,1)
     c_e = []
-    if n_pitches < 7
+    if n_iter != 1000
+    	n_iter = n_iter
+    elseif n_pitches < 7
         n_iter = factorial(n_pitches)
     end
     key_list = Array{Any}(undef, n_iter,2)
@@ -712,7 +720,7 @@ function get_rand_key_sequence(notes_chunk; center_effect=false, n_iter=1000,r=1
         ixes = [j for j=1:n_pitches]
         f_m = notes_chunk[shuffle(ixes),:]
         out = get_key_sequence(f_m, mod_12=mod_12,r=r,h=h,all_keys=all_keys,pos_all_keys=pos_all_keys,sbeat_w=sbeat_w,lin_w=lin_w)
-        push!(c_e, out[1])
+        push!(c_e, round.(out[1], digits = 4))
         m_key = out[2][1,:]
         key_list[t,1] = m_key[1]; key_list[t,2] = m_key[2]
     end
@@ -842,10 +850,79 @@ function divide_measure(notes_chunk)
     return sub_chunks
 end
 
-function get_key_sequence_old(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)
-    ptcs = notes_chunk[:,4] #Pitches
-    durs = notes_chunk[:,3] #durations
-    pbeat = notes_chunk[:,1] #beat where the note starts
+
+function get_distance_to_keys(c_i)
+    d_to_keys = round.(map(x-> euclidean(c_i, x), pos_all_keys), digits = 4) #computing the eclidean distance to all keys
+
+    ranking = sortperm(d_to_keys) #ranking the distances from the closest to the farthest
+
+    return [all_keys[ranking] d_to_keys[ranking] pos_all_keys[ranking]]
+end
+
+
+function cluster_notes(ptcs)
+    p_m12 = map(x-> mod(x,12),ptcs)
+    spi_notes = get_cfpitch(p_m12)
+    low_notes = findall(x-> x<=6, spi_notes)
+    high_notes = findall(x-> x>6, spi_notes)
+    if !isempty(high_notes) && !isempty(low_notes)
+        if length(high_notes) <= length(low_notes)
+            for i in 1:length(high_notes)
+                spi_notes = shift_outlier(spi_notes, high_notes[i])
+            end
+        else
+            for i in 1:length(low_notes)
+                spi_notes = shift_outlier(spi_notes, low_notes[i])
+            end
+        end
+    end
+    dmean = Float64[]
+    d_olier = Float64[]
+    oliers = Int64[]
+    new_spi = []
+    conv = false
+    while conv == false
+        dt_mean = zeros(length(spi_notes))
+        for i in 1:length(spi_notes)
+            dt_mean[i] = abs(spi_notes[i] - mean(spi_notes[1:end .!= i]))
+        end
+        d, olier = findmax(dt_mean)
+        push!(dmean, mean(dt_mean)); push!(oliers, olier);push!(d_olier, round(d, digits=4)); push!(new_spi, spi_notes)
+        #println(mean(dt_mean),'\t', olier, '\t', p_cf)
+        #println(mean(dt_mean),'\t', olier)
+        if length(oliers) > 20 && length(unique(oliers[end-4:end])) <= 2
+            conv = true
+            break
+        end
+        spi_notes = shift_outlier(spi_notes, olier)
+    end
+    mmin = findmin(dmean[end-3:end])[2]
+    dmin = findmin(d_olier[end-3:end])[2]
+    if dmean[end-3:end][mmin] == d_olier[end-3:end][dmin]
+        spi_out = new_spi[end-3:end][mmin]
+    elseif oliers[end-3:end][mmin] == oliers[end-3:end][dmin]
+        spi_out = new_spi[end-3:end][dmin]
+    else
+        spi_out = new_spi[end-3:end][mmin]
+    end
+    return spi_out
+end
+
+function shift_outlier(notes, olier)
+    dif = notes[olier] - median(notes)
+    notes_new = copy(notes)
+    if dif > 0
+        notes_new[olier] = notes_new[olier] - 12
+    elseif dif < 0
+        notes_new[olier] = notes_new[olier] + 12
+    end
+    return notes_new
+end
+
+function get_center_effect(chunk_notes; r=1, h=sqrt(2/15), mod_12=false,all_keys=all_keys, pos_all_keys=pos_all_keys, sbeat_w=[[1.],[1.]], lin_w=1)    
+    ptcs = chunk_notes[:,6]
+    durs = chunk_notes[:,5]
+    pbeat = chunk_notes[:,1]
     beat_w = ones(length(durs)) #array of the beat weights
     for b = 1:length(sbeat_w[1])
         loc_b = findall(x-> x==sbeat_w[1][b], pbeat) #finding all notes that start at beat sbeat_w[1][b]
@@ -855,30 +932,60 @@ function get_key_sequence_old(notes_chunk; r=1, h=sqrt(2/15), mod_12=false,all_k
     ii = vcat(map(x-> findall(y-> y==x, notas), ptcs)...)
     #println(ptcs)
     b_wei = n_we[ii] #getting the linear weight for every note i n the array of pitches
-    if mod_12
-        spi_ix = get_cfpitch_mod12(ptcs)
-        #println("WARNING! \n Doing module 12 notes.")
-    else
-        spi_ix = get_cfpitch(ptcs)
-            # max_dif = 10
-            # while max_dif > 6
-            #     nex_seq = reorder_seq_closest(spi_ix)
-            #     max_dif = maximum(map(x-> abs(x),diff(nex_seq)))
-            #     spi_ix = nex_seq
-            # end
-    end
+    
+    spi_ix = cluster_notes(ptcs) .+ 24
+
     spi_p = map(x-> get_pitch(x, r=r, h=h), spi_ix) #getting the location (x,y,z) for each pitch
     t_ws = map((x,y,z)-> x*y*z, beat_w,durs, b_wei) #computing the total weights
     cv_i = map((x,y)-> x*y, t_ws, spi_p) / sum(t_ws) #computing the location of the pitches with their relative weights
-
     c_i = sum(cv_i) #finding the center of effect
-
-    d_to_keys = map(x-> euclidean(c_i, x)^2, pos_all_keys) #computing the eclidean distance to all keys
-
-    ranking = sortperm(d_to_keys) #ranking the distances from the closest to the farthest
-
-    return c_i, [all_keys[ranking] d_to_keys[ranking]], [notes_chunk midi_note_names[ptcs.+1] spi_ix beat_w b_wei t_ws]
+    return c_i
 end
+
+function get_distance_ces(ce1, ce2)
+    z_dif = ce2[3] - ce1[3]
+    while abs(z_dif) > h_octav / 2 #translating over z to be in the same octave (same CE region)
+        if z_dif > 0
+            ce2[3] = ce2[3] - h_octav
+        else
+            ce2[3] = ce2[3] + h_octav
+        end
+        z_dif = ce2[3] - ce1[3]
+    end
+    return round(euclidean(ce1,ce2), digits = 4)
+end
+
+function get_xml_df(piece_xml)
+    piece = get_piece_by_measure(piece_xml, csv=false)
+    df_piece = DataFrame(
+        :Measure => convert(Array{Int64,1},piece[:,1]),
+        :TimeSignature => piece[:,2],
+        :StartQuarter => piece[:,3],
+        :EndQuarter => piece[:,4],
+        :Duration => piece[:,5],
+        :Pitch => convert(Array{Int64,1},piece[:,6])
+    )
+    return df_piece
+end
+function get_csv_df(piece_csv)
+    piece = get_piece_by_measure(piece_csv, csv=true)[1]
+    num_mea = []
+    for nm in 1:length(piece)
+        push!(num_mea,[nm for i in 1:size(piece[nm],1)])
+    end
+    num_mea = vcat(num_mea...)
+    piece = vcat(piece...)
+    df_piece = DataFrame(
+        :Measure => convert(Array{Int64,1},num_mea),
+        :TimeSignature => piece[:,2],
+        :StartTime => piece[:,3],
+        :EndTime => piece[:,4],
+        :Duration => piece[:,5],
+        :Pitch => convert(Array{Int64,1},piece[:,6])
+    )
+    return df_piece
+end
+
 ################################################################################
 #####TOOLS
 
