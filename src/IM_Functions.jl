@@ -53,15 +53,21 @@ function get_tprobs(f_eij)
         prob_e = f_ei[e]/n_e
         p_e[e] = get(p_e, e, prob_e)
     end
+   # m_p = Float64[]
+   # for i in 2:length(n_ei)
+   #     push!(m_p, p_e[n_ei[i]])
+   # end
     m_p = Float64[]
-    for i in 2:length(n_ei)
-        push!(m_p, p_e[n_ei[i]])
-    end
     p_ij = Dict{Any,Float64}()
     for eij in keys(f_eij)
         e1 = split(eij,"+")[1]
         prob_ij = f_eij[eij] / f_ei[e1]
         p_ij[eij] = get(p_ij, eij, prob_ij)
+    end
+    p_ij = sort(p_ij)
+    for eij in keys(p_ij)
+        e1 = split(eij,"+")[1]
+        push!(m_p, p_e[e1])
     end
     return m_p, sort(p_ij)
 end
